@@ -42,6 +42,17 @@
 - The entire portable folder can be moved or copied as one unit.
 - Initial AI runtime/model downloads still require internet access.
 
+## Automatic Windows builds
+
+Every push to `main` now triggers the `Build ZeroGPT Portable` GitHub Actions workflow. It builds on `windows-latest` and uploads both:
+
+```text
+ZeroGPT-Portable-Unpacked
+ZeroGPT-Portable-ZIP
+```
+
+You can download these from the repository's Actions run artifacts.
+
 ## Source/development quick start
 
 1. Clone or download this repository.
@@ -51,7 +62,7 @@
 
 Large model/runtime downloads can require many gigabytes of free disk space.
 
-## Build the portable release
+## Build the portable release locally
 
 After preparing the development environment once, double-click:
 
