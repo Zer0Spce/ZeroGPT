@@ -1,10 +1,20 @@
+import sys
 from pathlib import Path
 
 APP_NAME = "ZeroGPT"
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.0.1"
 
 ROOT = Path(__file__).resolve().parents[1]
-DATA_DIR = Path.home() / ".zerogpt"
+
+# Portable releases keep all ZeroGPT-owned data beside ZeroGPT.exe.
+# Source/development runs continue using the user's home folder.
+if getattr(sys, "frozen", False):
+    APP_DIR = Path(sys.executable).resolve().parent
+    DATA_DIR = APP_DIR / "ZeroGPT_Data"
+else:
+    APP_DIR = ROOT
+    DATA_DIR = Path.home() / ".zerogpt"
+
 RUNTIME_DIR = DATA_DIR / "runtime"
 GENERATIONS_DIR = DATA_DIR / "generations"
 ATTACHMENTS_DIR = DATA_DIR / "attachments"
