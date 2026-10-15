@@ -111,8 +111,6 @@ class SetupManager:
         )
 
     def _extract_comfy_archive(self, archive: Path):
-        # Windows 10/11 ships bsdtar, which supports current ComfyUI 7z archives
-        # including filters that py7zr does not currently handle (notably BCJ2).
         tar = shutil.which("tar") or shutil.which("tar.exe")
         if tar:
             self.log("Extracting with Windows tar…")
@@ -144,7 +142,6 @@ class SetupManager:
             ) from exc
 
     def _stop_zerogpt_comfy(self):
-        # Only stop ComfyUI processes launched from ZeroGPT's own runtime.
         try:
             import psutil
             runtime_text = str(RUNTIME_DIR).lower()
@@ -188,25 +185,23 @@ class SetupManager:
         checkpoints = comfy_root / "ComfyUI" / "models" / "checkpoints"
         checkpoints.mkdir(parents=True, exist_ok=True)
         model_path = checkpoints / DEFAULT_IMAGE_MODEL
-        # A partial/interrupted SDXL checkpoint can exist and still fail validation.
         if model_path.exists() and model_path.stat().st_size < 1_000_000_000:
             self.log("Partial image model detected — redownloading it.")
             model_path.unlink(missing_ok=True)
         if not model_path.exists():
-            self._emit(62, "Downloading the default SDXL Turbo image model…")
+            self._emit(62, "Downloading the high-quality SDXL Base image model…")
             self._download(DEFAULT_IMAGE_URL, model_path, 62, 92)
 
-        self._emit(93, "Starting ComfyUI…")
+        self._emit(93, "Starting ComfyUI in VRAM-safe quality mode…")
         self.start_comfyui()
 
-        # Verify the running server actually sees the checkpoint we just installed.
         try:
             info = requests.get("http://127.0.0.1:8188/object_info/CheckpointLoaderSimple", timeout=10)
             info.raise_for_status()
             values = info.json().get("CheckpointLoaderSimple", {}).get("input", {}).get("required", {}).get("ckpt_name", [[], {}])[0]
             if DEFAULT_IMAGE_MODEL not in values:
                 raise RuntimeError(
-                    "ComfyUI is online but the default image model is not visible to it. "
+                    "ComfyUI is online but the high-quality SDXL Base checkpoint is not visible to it. "
                     "Close any other ComfyUI instance using port 8188, then run Install / Repair Local AI again."
                 )
         except RuntimeError:
@@ -214,7 +209,7 @@ class SetupManager:
         except Exception as exc:
             raise RuntimeError(f"ComfyUI started, but ZeroGPT could not verify the image model: {exc}") from exc
 
-        self._emit(98, "ComfyUI is ready.")
+        self._emit(98, "ComfyUI and SDXL Base are ready.")
 
     def start_comfyui(self):
         root = RUNTIME_DIR / "ComfyUI_windows_portable"
@@ -223,21 +218,29 @@ class SetupManager:
         if not py.exists() or not main.exists():
             raise RuntimeError("ComfyUI runtime is incomplete. Re-run Install Local AI.")
 
-        # If a server is already on 8188, accept it only if it exposes ComfyUI.
         try:
             if requests.get("http://127.0.0.1:8188/system_stats", timeout=2).ok:
                 return
         except Exception:
             pass
 
+        # --medvram keeps SDXL Base practical on the user's 6 GB GPU while still
+        # allowing full-resolution 1024-class generations.
         subprocess.Popen(
-            [str(py), "-s", str(main), "--windows-standalone-build", "--listen", "127.0.0.1", "--port", "8188", "--disable-auto-launch"],
+            [
+                str(py), "-s", str(main),
+                "--windows-standalone-build",
+                "--listen", "127.0.0.1",
+                "--port", "8188",
+                "--disable-auto-launch",
+                "--medvram",
+            ],
             cwd=str(root / "ComfyUI"),
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
-        for _ in range(45):
+        for _ in range(60):
             try:
                 if requests.get("http://127.0.0.1:8188/system_stats", timeout=2).ok:
                     return
@@ -250,4 +253,4 @@ class SetupManager:
         self._emit(1, "ZeroGPT local AI setup started.")
         self.ensure_ollama()
         self.ensure_comfyui()
-        self._emit(100, "Everything is installed. ZeroGPT is ready for offline use.")
+        self._emit(100, "Everything is installed. ZeroGPT is ready for high-quality offline image generation.")
