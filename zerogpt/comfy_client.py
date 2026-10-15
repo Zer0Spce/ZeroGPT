@@ -5,7 +5,15 @@ from typing import Callable
 
 import requests
 
-from .config import COMFY_URL, DEFAULT_IMAGE_MODEL, RUNTIME_DIR
+from .config import (
+    COMFY_URL,
+    DEFAULT_IMAGE_CFG,
+    DEFAULT_IMAGE_MODEL,
+    DEFAULT_IMAGE_SAMPLER,
+    DEFAULT_IMAGE_SCHEDULER,
+    DEFAULT_IMAGE_STEPS,
+    RUNTIME_DIR,
+)
 
 
 class ComfyClient:
@@ -43,24 +51,57 @@ class ComfyClient:
             return []
 
     def checkpoints(self) -> list[str]:
-        # Prefer what the running server can actually load. Fall back to local files
-        # only when ComfyUI is offline/unavailable.
         server = self.server_checkpoints() if self.available() else []
         if server:
             return sorted(server)
         local = self.local_checkpoints()
         return local or [DEFAULT_IMAGE_MODEL]
 
-    def _workflow(self, prompt: str, negative: str, width: int, height: int, model: str, steps: int, cfg: float, seed: int) -> dict:
+    def _workflow(
+        self,
+        prompt: str,
+        negative: str,
+        width: int,
+        height: int,
+        model: str,
+        steps: int,
+        cfg: float,
+        seed: int,
+        sampler: str | None = None,
+        scheduler: str | None = None,
+    ) -> dict:
         turbo = "turbo" in model.lower()
-        effective_steps = min(8, steps) if turbo else steps
-        effective_cfg = min(2.0, cfg) if turbo else cfg
+        if turbo:
+            effective_steps = min(8, max(1, steps))
+            effective_cfg = min(2.0, max(0.5, cfg))
+            sampler_name = "euler"
+            scheduler_name = "normal"
+        else:
+            effective_steps = max(12, steps)
+            effective_cfg = max(3.0, cfg)
+            sampler_name = sampler or DEFAULT_IMAGE_SAMPLER
+            scheduler_name = scheduler or DEFAULT_IMAGE_SCHEDULER
+
         return {
             "1": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": model}},
             "2": {"class_type": "CLIPTextEncode", "inputs": {"text": prompt, "clip": ["1", 1]}},
             "3": {"class_type": "CLIPTextEncode", "inputs": {"text": negative, "clip": ["1", 1]}},
             "4": {"class_type": "EmptyLatentImage", "inputs": {"width": width, "height": height, "batch_size": 1}},
-            "5": {"class_type": "KSampler", "inputs": {"seed": seed, "steps": effective_steps, "cfg": effective_cfg, "sampler_name": "euler", "scheduler": "normal", "denoise": 1.0, "model": ["1", 0], "positive": ["2", 0], "negative": ["3", 0], "latent_image": ["4", 0]}},
+            "5": {
+                "class_type": "KSampler",
+                "inputs": {
+                    "seed": seed,
+                    "steps": effective_steps,
+                    "cfg": effective_cfg,
+                    "sampler_name": sampler_name,
+                    "scheduler": scheduler_name,
+                    "denoise": 1.0,
+                    "model": ["1", 0],
+                    "positive": ["2", 0],
+                    "negative": ["3", 0],
+                    "latent_image": ["4", 0],
+                },
+            },
             "6": {"class_type": "VAEDecode", "inputs": {"samples": ["5", 0], "vae": ["1", 2]}},
             "7": {"class_type": "SaveImage", "inputs": {"filename_prefix": "ZeroGPT", "images": ["6", 0]}},
         }
@@ -87,20 +128,34 @@ class ComfyClient:
             msg += f" Details: {detail}"
         return RuntimeError(msg)
 
-    def generate(self, prompt: str, *, negative: str = "low quality, blurry, distorted", width: int = 1024, height: int = 1024, model: str = DEFAULT_IMAGE_MODEL, steps: int = 4, cfg: float = 1.0, seed: int | None = None, timeout: int = 900, progress: Callable[[str], None] | None = None, cancel: Callable[[], bool] | None = None) -> tuple[bytes, int]:
+    def generate(
+        self,
+        prompt: str,
+        *,
+        negative: str = "low quality, blurry, distorted, deformed hands, bad anatomy, artifacts",
+        width: int = 1024,
+        height: int = 1024,
+        model: str = DEFAULT_IMAGE_MODEL,
+        steps: int = DEFAULT_IMAGE_STEPS,
+        cfg: float = DEFAULT_IMAGE_CFG,
+        sampler: str | None = None,
+        scheduler: str | None = None,
+        seed: int | None = None,
+        timeout: int = 1200,
+        progress: Callable[[str], None] | None = None,
+        cancel: Callable[[], bool] | None = None,
+    ) -> tuple[bytes, int]:
         seed = int(seed if seed is not None else random.randint(1, 2**31 - 1))
 
         available = self.server_checkpoints()
         if available and model not in available:
-            # If the UI still has a stale selection after a repair, use the first
-            # checkpoint that the running ComfyUI server confirms it can load.
-            model = available[0]
+            model = DEFAULT_IMAGE_MODEL if DEFAULT_IMAGE_MODEL in available else available[0]
         elif not available:
             raise RuntimeError(
                 "ComfyUI is online, but no image checkpoint is available. Run Install / Repair Local AI and wait for it to finish."
             )
 
-        workflow = self._workflow(prompt, negative, width, height, model, steps, cfg, seed)
+        workflow = self._workflow(prompt, negative, width, height, model, steps, cfg, seed, sampler, scheduler)
         r = requests.post(f"{self.base_url}/prompt", json={"prompt": workflow}, timeout=20)
         if not r.ok:
             raise self._prompt_error(r, model)
@@ -132,6 +187,6 @@ class ComfyClient:
                         view.raise_for_status()
                         return view.content, seed
             if progress:
-                progress("Generating…")
+                progress("Generating high-quality image…")
             time.sleep(0.75)
         raise TimeoutError("Image generation timed out")
