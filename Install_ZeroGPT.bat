@@ -1,40 +1,51 @@
 @echo off
-setlocal
+setlocal EnableExtensions
 cd /d "%~dp0"
 title ZeroGPT Installer
 color 0A
 
 echo.
-echo  =========================================
-echo          ZeroGPT One-Click Setup
-echo  =========================================
+echo  ==================================================
+echo           ZeroGPT - One Click Windows Setup
+echo  ==================================================
 echo.
+
+where winget >nul 2>nul
+if errorlevel 1 (
+  echo ERROR: Windows App Installer ^(winget^) was not found.
+  echo Install "App Installer" from Microsoft Store and run this again.
+  pause
+  exit /b 1
+)
 
 where py >nul 2>nul
 if errorlevel 1 (
-  echo [1/4] Installing Python...
-  winget install --id Python.Python.3.12 -e --accept-package-agreements --accept-source-agreements
+  echo [1/3] Installing Python 3.12...
+  winget install --id Python.Python.3.12 -e --silent --accept-package-agreements --accept-source-agreements
+  if errorlevel 1 goto :fail
 ) else (
-  echo [1/4] Python detected.
+  echo [1/3] Python launcher detected.
 )
 
-where git >nul 2>nul
-if errorlevel 1 (
-  echo [2/4] Installing Git...
-  winget install --id Git.Git -e --accept-package-agreements --accept-source-agreements
-) else (
-  echo [2/4] Git detected.
-)
-
-echo [3/4] Creating ZeroGPT environment...
-py -3.12 -m venv .venv
+echo [2/3] Preparing ZeroGPT...
+if not exist ".venv\Scripts\python.exe" py -3.12 -m venv .venv
+if errorlevel 1 goto :fail
 call .venv\Scripts\activate.bat
 python -m pip install --upgrade pip
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
+if errorlevel 1 goto :fail
 
-echo [4/4] Launching ZeroGPT...
-start "ZeroGPT" .venv\Scripts\pythonw.exe app.py
-
+echo [3/3] Launching ZeroGPT...
+start "ZeroGPT" "%CD%\.venv\Scripts\pythonw.exe" "%CD%\app.py"
 echo.
-echo ZeroGPT is starting. Inside the app, click "Install Local AI" once to download Ollama, the chat model, ComfyUI, and the default image model.
+echo ZeroGPT is launching.
+echo Click "Install / Repair Local AI" once inside the app to download
+ echo Ollama, the default chat model, ComfyUI, and the image model.
+echo.
+exit /b 0
+
+:fail
+echo.
+echo ZeroGPT setup failed. Review the error above, then run this file again.
 pause
+exit /b 1
