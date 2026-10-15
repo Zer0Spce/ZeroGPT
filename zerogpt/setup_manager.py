@@ -224,8 +224,8 @@ class SetupManager:
         except Exception:
             pass
 
-        # --medvram keeps SDXL Base practical on the user's 6 GB GPU while still
-        # allowing full-resolution 1024-class generations.
+        # Current ComfyUI supports --lowvram. This keeps SDXL Base practical on
+        # a 6 GB NVIDIA GPU by moving text encoders/offloaded components to RAM.
         subprocess.Popen(
             [
                 str(py), "-s", str(main),
@@ -233,7 +233,7 @@ class SetupManager:
                 "--listen", "127.0.0.1",
                 "--port", "8188",
                 "--disable-auto-launch",
-                "--medvram",
+                "--lowvram",
             ],
             cwd=str(root / "ComfyUI"),
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
