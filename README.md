@@ -2,7 +2,7 @@
 
 **ZeroGPT** is a Windows-first desktop AI workspace designed to run chat, vision, and image generation locally on your own machine.
 
-## ZeroGPT 1.0
+## ZeroGPT 1.0.1 Portable
 
 ### Chat
 - Ollama-powered local chat
@@ -33,51 +33,59 @@
 - View/import ComfyUI checkpoints
 - Hardware-aware model recommendations
 
-### Setup and privacy
-- One-click `Install_ZeroGPT.bat` app bootstrap
-- In-app **Install / Repair Local AI** workflow
-- Automatically installs/starts Ollama
-- Automatically downloads the default chat model
-- Automatically downloads the official ComfyUI Windows portable runtime
-- Automatically downloads the default image checkpoint
-- Runtime status indicators for Ollama and ComfyUI
-- Data lives under `%USERPROFILE%\.zerogpt`
-- After required models are downloaded, normal inference runs locally
+### Portable release behavior
+- No installer is required for the built ZeroGPT application.
+- The build output is an unpacked `ZeroGPT-Portable` folder.
+- The same folder is also packaged automatically as `ZeroGPT-Portable.zip`.
+- Run `ZeroGPT.exe` directly from the extracted folder.
+- Chats, settings, generated images, attachments, and ZeroGPT's downloaded ComfyUI runtime live in `ZeroGPT_Data` beside the EXE.
+- The entire portable folder can be moved or copied as one unit.
+- Initial AI runtime/model downloads still require internet access.
 
-## Windows quick start
+## Source/development quick start
 
 1. Clone or download this repository.
-2. Double-click `Install_ZeroGPT.bat`.
-3. ZeroGPT launches automatically.
-4. Click **Install / Repair Local AI** inside the app.
-5. Leave the setup page open until it reports that everything is ready.
+2. Double-click `Install_ZeroGPT.bat` to prepare the Python build environment.
+3. Launch ZeroGPT.
+4. Click **Install / Repair Local AI** inside the app if Ollama/ComfyUI/models are not ready.
 
 Large model/runtime downloads can require many gigabytes of free disk space.
 
-## Build the EXE
+## Build the portable release
 
-After running the installer once, double-click:
+After preparing the development environment once, double-click:
 
 ```text
 Build_ZeroGPT.bat
 ```
 
-The Windows build will be written to:
+It produces both:
 
 ```text
-dist\ZeroGPT\ZeroGPT.exe
+release\ZeroGPT-Portable\
+release\ZeroGPT-Portable.zip
 ```
 
-## Local data layout
+The unpacked folder contains `ZeroGPT.exe` and all application dependencies required by the PyInstaller build.
+
+## Portable data layout
 
 ```text
-%USERPROFILE%\.zerogpt\
-  zerogpt.db
-  attachments\
-  generations\
-  runtime\
-    ComfyUI_windows_portable\
+ZeroGPT-Portable\
+  ZeroGPT.exe
+  README-PORTABLE.txt
+  _internal\
+  ZeroGPT_Data\
+    zerogpt.db
+    attachments\
+    generations\
+    runtime\
+      ComfyUI_windows_portable\
 ```
+
+`ZeroGPT_Data` is created automatically on first run.
+
+When running from source instead of the frozen EXE, development data continues to use `%USERPROFILE%\.zerogpt`.
 
 ## Development
 
