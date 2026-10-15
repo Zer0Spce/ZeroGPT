@@ -18,15 +18,38 @@ class ComfyClient:
         except requests.RequestException:
             return False
 
-    def checkpoints(self) -> list[str]:
+    def local_checkpoints(self) -> list[str]:
         root = RUNTIME_DIR / "ComfyUI_windows_portable" / "ComfyUI" / "models" / "checkpoints"
         if not root.exists():
-            return [DEFAULT_IMAGE_MODEL]
+            return []
         names = []
         for p in root.iterdir():
-            if p.suffix.lower() in {".safetensors", ".ckpt", ".pt"}:
+            if p.is_file() and p.suffix.lower() in {".safetensors", ".ckpt", ".pt"}:
                 names.append(p.name)
-        return sorted(names) or [DEFAULT_IMAGE_MODEL]
+        return sorted(names)
+
+    def server_checkpoints(self) -> list[str]:
+        try:
+            r = requests.get(f"{self.base_url}/object_info/CheckpointLoaderSimple", timeout=10)
+            r.raise_for_status()
+            return list(
+                r.json()
+                .get("CheckpointLoaderSimple", {})
+                .get("input", {})
+                .get("required", {})
+                .get("ckpt_name", [[], {}])[0]
+            )
+        except Exception:
+            return []
+
+    def checkpoints(self) -> list[str]:
+        # Prefer what the running server can actually load. Fall back to local files
+        # only when ComfyUI is offline/unavailable.
+        server = self.server_checkpoints() if self.available() else []
+        if server:
+            return sorted(server)
+        local = self.local_checkpoints()
+        return local or [DEFAULT_IMAGE_MODEL]
 
     def _workflow(self, prompt: str, negative: str, width: int, height: int, model: str, steps: int, cfg: float, seed: int) -> dict:
         turbo = "turbo" in model.lower()
@@ -42,11 +65,45 @@ class ComfyClient:
             "7": {"class_type": "SaveImage", "inputs": {"filename_prefix": "ZeroGPT", "images": ["6", 0]}},
         }
 
+    def _prompt_error(self, response: requests.Response, model: str) -> RuntimeError:
+        detail = ""
+        try:
+            payload = response.json()
+            detail = payload.get("error", {}).get("message") or payload.get("error", {}).get("details") or str(payload)
+        except Exception:
+            detail = response.text.strip()
+        available = self.server_checkpoints()
+        if model not in available:
+            if available:
+                return RuntimeError(
+                    f"ComfyUI rejected the workflow because checkpoint '{model}' is not available. "
+                    f"Available checkpoint(s): {', '.join(available[:8])}. Open Settings and run Install / Repair Local AI."
+                )
+            return RuntimeError(
+                "ComfyUI is online but has no usable image checkpoint loaded. Run Install / Repair Local AI and let setup finish completely."
+            )
+        msg = f"ComfyUI rejected the image workflow ({response.status_code})."
+        if detail:
+            msg += f" Details: {detail}"
+        return RuntimeError(msg)
+
     def generate(self, prompt: str, *, negative: str = "low quality, blurry, distorted", width: int = 1024, height: int = 1024, model: str = DEFAULT_IMAGE_MODEL, steps: int = 4, cfg: float = 1.0, seed: int | None = None, timeout: int = 900, progress: Callable[[str], None] | None = None, cancel: Callable[[], bool] | None = None) -> tuple[bytes, int]:
         seed = int(seed if seed is not None else random.randint(1, 2**31 - 1))
+
+        available = self.server_checkpoints()
+        if available and model not in available:
+            # If the UI still has a stale selection after a repair, use the first
+            # checkpoint that the running ComfyUI server confirms it can load.
+            model = available[0]
+        elif not available:
+            raise RuntimeError(
+                "ComfyUI is online, but no image checkpoint is available. Run Install / Repair Local AI and wait for it to finish."
+            )
+
         workflow = self._workflow(prompt, negative, width, height, model, steps, cfg, seed)
         r = requests.post(f"{self.base_url}/prompt", json={"prompt": workflow}, timeout=20)
-        r.raise_for_status()
+        if not r.ok:
+            raise self._prompt_error(r, model)
         prompt_id = r.json()["prompt_id"]
         deadline = time.time() + timeout
         while time.time() < deadline:
@@ -59,11 +116,19 @@ class ComfyClient:
             history = requests.get(f"{self.base_url}/history/{prompt_id}", timeout=10).json()
             if prompt_id in history:
                 outputs = history[prompt_id].get("outputs", {})
+                status = history[prompt_id].get("status", {})
+                if status.get("status_str") == "error":
+                    messages = status.get("messages", [])
+                    raise RuntimeError(f"ComfyUI generation failed: {messages[-1] if messages else 'unknown error'}")
                 for node in outputs.values():
                     images = node.get("images", [])
                     if images:
                         image = images[0]
-                        view = requests.get(f"{self.base_url}/view", params={"filename": image["filename"], "subfolder": image.get("subfolder", ""), "type": image.get("type", "output")}, timeout=90)
+                        view = requests.get(
+                            f"{self.base_url}/view",
+                            params={"filename": image["filename"], "subfolder": image.get("subfolder", ""), "type": image.get("type", "output")},
+                            timeout=90,
+                        )
                         view.raise_for_status()
                         return view.content, seed
             if progress:
